@@ -1,11 +1,11 @@
 {
-  "name": "@google/gemini-cli-sdk",
-  "version": "0.42.0-nightly.20260428.g59b2dea0e",
-  "description": "Gemini CLI SDK",
+  "name": "@dxen/sdk",
+  "version": "0.1.0-dxen.0",
+  "description": "Dxen CLI SDK",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/google-gemini/gemini-cli.git"
+    "url": "git+https://github.com/cazyundee/dxen.git"
   },
   "type": "module",
   "main": "dist/index.js",
@@ -22,7 +22,7 @@
     "dist"
   ],
   "dependencies": {
-    "@google/gemini-cli-core": "file:../core",
+    "@dxen/core": "file:../core",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.23.1"
   },
