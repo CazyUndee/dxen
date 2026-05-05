@@ -1282,25 +1282,32 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
       }
     }
 
-    // Reconstruct toolResponseParts in the original order
+    // Reconstruct toolResponseParts in the original order.
+    // Every functionCall from the model MUST have exactly one corresponding functionResponse part
+    // in the user turn to satisfy the Gemini API protocol.
     const toolResponseParts: Part[] = [];
     for (const [index, functionCall] of functionCalls.entries()) {
       const callId = functionCall.id ?? `${promptId}-${index}`;
       const part = syncResults.get(callId);
+
       if (part) {
         toolResponseParts.push(part);
+      } else {
+        // This should not happen if the scheduler is working correctly, but if it does,
+        // we MUST inject a synthetic error response to maintain the 1:1 part mapping.
+        debugLogger.error(
+          `[LocalAgentExecutor] Internal Error: No tool result found for callId ${callId} (${functionCall.name}). Injecting synthetic error response to maintain protocol integrity.`,
+        );
+        toolResponseParts.push({
+          functionResponse: {
+            name: functionCall.name,
+            id: callId,
+            response: {
+              error: `Internal Error: Tool execution result was lost. Please try the operation again.`,
+            },
+          },
+        });
       }
-    }
-
-    // If all authorized tool calls failed (and task isn't complete), provide a generic error.
-    if (
-      functionCalls.length > 0 &&
-      toolResponseParts.length === 0 &&
-      !taskCompleted
-    ) {
-      toolResponseParts.push({
-        text: 'All tool calls failed or were unauthorized. Please analyze the errors and try an alternative approach.',
-      });
     }
 
     return {
