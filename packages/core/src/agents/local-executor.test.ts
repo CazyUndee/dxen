@@ -2227,6 +2227,126 @@ describe('LocalAgentExecutor', () => {
       // Agent should terminate with ABORTED status
       expect(output.terminate_reason).toBe(AgentTerminateMode.ABORTED);
     });
+
+    it('should maintain 1:1 function call to response mapping even when tool results are missing', async () => {
+      const definition = createTestDefinition([LS_TOOL_NAME]);
+      const executor = await LocalAgentExecutor.create(
+        definition,
+        mockConfig,
+        onActivity,
+      );
+
+      // Turn 1: Model calls two tools
+      mockModelResponse([
+        { name: LS_TOOL_NAME, args: { path: 'dir1' }, id: 'call1' },
+        { name: LS_TOOL_NAME, args: { path: 'dir2' }, id: 'call2' },
+      ]);
+
+      // Simulate scheduler returning only ONE result for TWO calls
+      mockScheduleAgentTools.mockResolvedValueOnce([
+        {
+          status: 'success',
+          request: { callId: 'call1', name: LS_TOOL_NAME },
+          response: {
+            responseParts: [
+              {
+                functionResponse: {
+                  name: LS_TOOL_NAME,
+                  id: 'call1',
+                  response: { ok: true },
+                },
+              },
+            ],
+          },
+        },
+      ]);
+
+      // Mock completion turn so the agent stops
+      mockModelResponse([
+        {
+          name: COMPLETE_TASK_TOOL_NAME,
+          args: { finalResult: 'done' },
+          id: 'call3',
+        },
+      ]);
+      mockScheduleAgentTools.mockResolvedValueOnce([
+        {
+          status: 'success',
+          request: { callId: 'call3', name: COMPLETE_TASK_TOOL_NAME },
+          response: {
+            resultDisplay: 'Task completed.',
+            responseParts: [],
+            data: { taskCompleted: true, submittedOutput: 'done' },
+          },
+        },
+      ]);
+
+      await executor.run({ goal: 'Protocol test' }, signal);
+
+      // Verify Turn 2 message (the one containing tool responses)
+      const turn2Params = getMockMessageParams(1);
+      const parts = turn2Params.message as Part[];
+
+      // Protocol Check: Must have 2 parts to match the 2 calls in Turn 1
+      expect(parts.length).toBe(2);
+      expect(parts[0].functionResponse?.id).toBe('call1');
+      expect(parts[1].functionResponse?.id).toBe('call2');
+      expect(parts[1].functionResponse?.response?.['error']).toContain(
+        'Internal Error',
+      );
+    });
+
+    it('should NOT inject a text part instead of functionResponse when all tool calls fail', async () => {
+      const definition = createTestDefinition([LS_TOOL_NAME]);
+      const executor = await LocalAgentExecutor.create(
+        definition,
+        mockConfig,
+        onActivity,
+      );
+
+      // Turn 1: Model calls one tool
+      mockModelResponse([
+        { name: LS_TOOL_NAME, args: { path: 'dir1' }, id: 'call1' },
+      ]);
+
+      // Simulate scheduler returning NO results
+      mockScheduleAgentTools.mockResolvedValueOnce([]);
+
+      // Mock completion turn
+      mockModelResponse([
+        {
+          name: COMPLETE_TASK_TOOL_NAME,
+          args: { finalResult: 'done' },
+          id: 'call2',
+        },
+      ]);
+      mockScheduleAgentTools.mockResolvedValueOnce([
+        {
+          status: 'success',
+          request: { callId: 'call2', name: COMPLETE_TASK_TOOL_NAME },
+          response: {
+            resultDisplay: 'Task completed.',
+            responseParts: [],
+            data: { taskCompleted: true, submittedOutput: 'done' },
+          },
+        },
+      ]);
+
+      await executor.run({ goal: 'Protocol test 2' }, signal);
+
+      // Verify Turn 2 message
+      const turn2Params = getMockMessageParams(1);
+      const parts = turn2Params.message as Part[];
+
+      // Protocol Check: Must have 1 functionResponse part, NOT a text part
+      expect(parts.length).toBe(1);
+      expect(parts[0]).not.toHaveProperty('text');
+      expect(parts[0]).toHaveProperty('functionResponse');
+      expect(parts[0].functionResponse?.id).toBe('call1');
+      expect(parts[0].functionResponse?.response?.['error']).toContain(
+        'Internal Error',
+      );
+    });
   });
 
   describe('Model Routing', () => {
